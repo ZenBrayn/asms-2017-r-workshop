@@ -79,7 +79,7 @@ out_df[idx_sel, "barcode"] <- str_replace(out_df[idx_sel, "barcode"], "D", "G")
 
 # Write out the final data file 
 # (with the errors we'll later find and correct)
-write.table(out_df, "sample_attributes_with_errors.csv", row.names = FALSE, sep = ",")
+write.table(out_df, "input_data/sample_attributes_with_errors.csv", row.names = FALSE, sep = ",")
 
 
 

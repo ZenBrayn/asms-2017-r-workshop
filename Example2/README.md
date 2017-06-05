@@ -1,4 +1,4 @@
-# Example #1: Data Cleaning, Tidying and Visualization
+# Example #2: Exploratory Data Analysis of an Example mzML File
 
 In this example, an example mzML file is read into R and the resulting data is reviewed with simple analysis and visualizations
 
