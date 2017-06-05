@@ -1,0 +1,249 @@
+---
+title: 'Example #1: Clean and Tidy the Data'
+author: "R. Benz"
+date: "5/8/2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(stringr)
+library(readxl)
+library(tidyverse)
+```
+
+## Purpose
+
+This report summarizes the analysis steps used to clean, verify and tidy the sample attributes and work list files associated with our *mock* LC-MS experiment, described below.  The represents one of the first data analysis tasks one would perform in the coarse of a full study analysis.  The final goal of the work performed here is to produce a single tidy output file with sample ID's, attributes and experimental data file names.  This data could then be used in combination with the experimental raw data to perform further study analysis.
+
+## Summary of the Mock LC-MS Experiment
+
+The mock LC-MS experiment envisioned here represents a study comparing -omics data from 216 individuals treated for a particular condition using one of three different treatments.  Patient samples were collected across two different sites, 108 samples each, balanced across females and males.
+
+The group responsible for sample collection compiled the patient attributes into a single data file capturing a unique patient barcode, a sample name encoding site, gender and age, the treatment type, and the collection site.  For this example, a few errors were made in this data file, which we will uncover and fix before proceeding with further analysis.
+
+In a second set of data, the LC-MS laboratory staff created a set of worklist files to be used for data collection.  This data defines the experimental run order for the samples and blanks, the instrument methods used, and a few other experimental parameters.  By combining this data with the sample attributes file, a complete set of meta-data can be easily combined with the LC-MS experimental data during the main study analysis.
+
+
+## Input
+
+**File**: sample_attributes_with_errors.csv
+
+* Contains attributes associated with the experimental samples
+* 216 rows (samples), 5 columns (attributes)
+* MD5 Checksum: a51bdb652b6431fee66462c1d4f60f12
+
+```{r, message=FALSE}
+attr_dat <- read_csv("input_data/sample_attributes_with_errors.csv")
+head(attr_dat)
+```
+
+**File**: experiment_worklists.xlsx
+
+* Excel file with 3 sheets listing the experimental data file names and parameters
+* 3 sheets total, multiple rows per sheet
+* MD5 Checksum: 8826db004d6df1224b2b39cd16bf91a6
+
+---
+
+## Data Processing
+
+### 1. Review the Sample Attributes File & Fix Problems
+
+The attributes file is expected to have 216 rows (one for each sample) and 5 columns.
+
+```{r}
+# List the dimensions of the data: # rows x # columns
+dim(attr_dat)
+```
+
+The output show that there are ```r nrow(attr_dat)``` rows, ```r nrow(attr_dat) - 216``` more than expected.  This might indicate a duplicate entry in the data.  The barcode column should give a unique ID for each samples.  Let's check that we have exactly 1 unique barcode for each of the 216 samples.
+
+```{r}
+id_dups <- attr_dat %>% 
+  group_by(barcode) %>% 
+  summarize(n_barcodes = length(barcode)) %>%
+  filter(n_barcodes > 1)
+id_dups
+```
+
+This shows that barcode ```r id_dups$barcode``` was used ```r id_dups$n_barcodes``` times.  Let's see the specific rows in the data to make sure this is an exact duplicate.
+
+```{r}
+attr_dat %>%
+  filter(barcode %in% id_dups$barcode)
+```
+
+The output shows this is an exact duplicate of the data.  Let's remove the extra entry.
+
+```{r}
+# Find the rows that have the duplicated barcode; remove the second index
+idx_sel <- which(attr_dat$barcode %in% id_dups$barcode)
+idx_sel
+
+# Remove the duplicated entry
+attr_dat <- attr_dat[-idx_sel[2],]
+dim(attr_dat)
+length(unique(attr_dat$barcode))
+```
+
+We can now confirm that the data has ```r length(unique(attr_dat$barcode))``` unique sample barcodes, as expected.
+
+There are two more mistakes in the attributes file, which are fixed in the code below.  In practice, when mistakes aren't typically known a priori, careful review of the data would hopefully bring them to light.  Fixing or changing data should not be taken lightly and should be performed after receving input and discussing the proposed changes with the people responsible for generating the underlying data.
+
+```{r}
+# NOTE: This is complex R code and may not make sense for R beginners
+# Fix the incorrect sites (differences between sample_name and site columns)
+incr_sites <- attr_dat %>% 
+  mutate(correct_site = str_match(sample_name, "^(site_[0-9])-")[,2]) %>%
+  filter(correct_site != site) %>%
+  select(sample_name, correct_site) %>%
+  deframe
+idx_sel <- which(attr_dat$sample_name %in% names(incr_sites))
+attr_dat[idx_sel, "site"] <- as.character(incr_sites[attr_dat[idx_sel,]$sample_name])
+
+# Fix an typo in one of the barcodes (RND was incorrected entered as RNG)
+incr_barcode <- attr_dat %>% 
+  filter(!str_detect(barcode, "^SAMP-RND"))
+idx_sel <- which(attr_dat$barcode %in% incr_barcode$barcode)
+attr_dat[idx_sel, "barcode"] <- str_replace(attr_dat[idx_sel, "barcode"], "SAMP-RNG", "SAMP-RND")
+```
+
+### 2. Add Additional Information to the Attributes Data Frame
+
+When the samples are run through LC-MS, it's important to have a direct, unambiguous link between the samples and the experimental data files.  For this example, the sample barcodes will be use as the sample ID to link with the experimental data files.  However, the barcodes listed in the attributes file have "SAMP-" in the front, whereas the (hypothetical) scanned barcode on the sample vials do not (they start with RND...).  Therefore, we need to add a new column in our attributes file, ```sample_id``` to hold the modified barcode entry.
+
+```{r}
+attr_dat <- attr_dat %>%
+  mutate(sample_id = str_match(barcode, "^SAMP-(RND[0-9]+)")[,2])
+```
+
+Finally, the ```sample_name``` column has mulitple pieces of data encoded in it (site-gender-age).  This data should be extracted into individual columns so it can be easily accessed in future analyses.
+
+```{r}
+# Separate the sample name data into individual columns
+attr_dat <- attr_dat %>%
+  separate(sample_name, into = c("site_tmp", "gender", "age"), sep = "-", remove = FALSE) %>%
+  select(-site_tmp)
+```
+
+
+### 3. Save the Tidy Data to a CSV File
+
+Now that we've resolved the errors in the attributes file and parse the data, let's save a new copy that we'll use for the rest of the analysis.
+
+```{r}
+write.table(attr_dat, "parsed_data/sample_attributes_fixed.csv", row.names = FALSE, sep = ",")
+```
+
+
+### 4. Read and Combine The Experimental Worklists Excel File
+
+The LC-MS experiments were run across 3 worklists with 72 samples and 6 blanks each.  The experimental data file names, run order, sample ID's, and other experimental data were captured in a single Excel file with 3 sheets, one for each worklist.  We can read the Excel file and parse the data using R.
+
+To read the data correctly from the Excel file, you must first understand the structure of the data since Excel allows for *free-form* data entry.  In the example Excel file used here, the main worklist data table starts on row 5 so we'll need to skip the first 4 lines.  Also, while it's possible to refer to the Excel sheets by sheet number, it's preferable to refer to them explicitly by sheet name.
+
+```{r}
+# Read the worklist data tables from the Excel file
+# Since we need to repeat this process for each of the 3 sheets, we'll write a function to do this
+read_worklist_datatable <- function(sheetname, filename) {
+  dat <- read_excel(filename, sheet = sheetname, skip = 4)
+  # Add a new column, the experiment date, parsed from the sheet name
+  dat$expr_date <- str_match(sheetname, "^Worklist (.+)$")[,2]
+  
+  dat
+}
+
+sheet_names <- c("Worklist 3-20-2017", 
+                 "Worklist 4-10-2017",
+                 "Worklist 4-30-2017")
+sheet_data <- map(sheet_names, read_worklist_datatable, "input_data/experiment_worklists.xlsx")
+worklist_dat <- bind_rows(sheet_data)
+
+# Excel names are usually not good names for programming.  Rename them.
+worklist_dat <- worklist_dat %>%
+  rename(run_idx = `Run Index`,
+         file_name = `Data file name`,
+         sample_type = `Sample Type`,
+         sample_name = `Sample Name`,
+         method = Method,
+         inj_vol_ul = `Injection Volume (uL)`)
+
+```
+
+At this point, ```worklist_dat``` is a single data frame containing the worklist table from the 3 Excel sheets.  Basic checks of the data should be performed to make sure everything is as expected.
+
+```{r}
+# 3 days of experiments, each with 72 samples and 6 blanks.
+# We expect to have 216 samples and 6*3 = 18 blanks, with 234 total rows
+dim(worklist_dat)
+table(worklist_dat$sample_type)
+table(worklist_dat$expr_date, worklist_dat$sample_type)
+```
+
+### 5. Review the Worklist Data for Consistency
+
+The basic structure of the worklist tables looks OK.  Now, let's confirm that we have all of the expected sample ID's in our worklist data.  The sample ID's are stored in the worklist data as ```sample_name```.  We expect to have exactly 216 unique ```sample_names``` and that all are present in the ```attr_dat``` data frame in the column ```sample_id```.
+
+```{r}
+# We need to first remove the blanks before we do the check
+samp_dat <- worklist_dat %>%
+  filter(sample_type == "sample")
+
+length(unique(samp_dat$sample_name))
+
+all(samp_dat$sample_name %in% attr_dat$sample_id)
+```
+
+In practice, one would want to do more checks on the data, but we'll proceed since things look OK.  We'll make one final modification to the worklist data.  The run_idx goes from 1 - 78 for each of the 3 days.  Let's add a new column called ```run_order``` that give the overall run ordering across the entire experiment, from 1 - 234.
+
+```{r}
+worklist_dat$run_order <- 1:nrow(worklist_dat)
+```
+
+### 6. Merge the Sample Attributes and Worklists Files, Review the Merge
+
+Now, it's time to merge the sample attributes with the worklist data.
+
+```{r}
+samp_dat <- worklist_dat %>%
+  filter(sample_type == "sample")
+
+# by.x refers to the merging column in attr_dat
+# by.y refers to the associated merging column in samp_dat
+combined_dat <- merge(attr_dat, samp_dat, by.x = "sample_id", by.y = "sample_name")
+combined_dat <- combined_dat %>%
+  arrange(run_order)
+```
+
+After merging data, it's always important to check the results.  We expect to have 216 rows (for the 216 samples), with 216 unique ```sample_id```'s and 216 unique ```file_name```'s.
+
+```{r}
+length(unique(combined_dat$sample_id))
+length(unique(combined_dat$file_name))
+```
+
+Everything looks as expected.  Good job!  
+
+### 7. Save the Final Data to CSV Files
+
+Now, let's save both the worklist data and the combined data.
+
+```{r}
+write.table(worklist_dat, "parsed_data/worklist_data.csv", row.names = FALSE, sep = ",")
+write.table(combined_dat, "parsed_data/experiment_attributes_data.csv", row.names = FALSE, sep = ",")
+```
+
+
+## Summary
+
+This completes the data tidying process.  To recap:
+
+* We reviewed and checked the sample attributes files for any errors.  A few errors were noted and fixed.
+* We read the worklist data from an Excel file, merged the data tables from 3 separate sheets and performed a basic check of the results.
+* We merged the sample attributes and experimental worklist data into a single data frame that can be used for future analysis.
+* This work was captured in an RMarkdown report, combining documentation and code on what was done.  Anyone can review and *execute* the report to reproduce the results.
+
+
+
+

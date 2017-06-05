@@ -1,0 +1,275 @@
+---
+title: 'Example 2: Working with MS Data'
+author: "R. Benz"
+date: "5/11/2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(mzR)
+library(knitr)
+library(tidyverse)
+
+set.seed(654321)
+```
+
+## Purpose
+
+In this example, we'll use R to work with LC-MS data in [mzML format](http://www.psidev.info/mzml_1_0_0%20), using the  ```mzR``` [R package](http://bioconductor.org/packages/release/bioc/html/mzR.html).  Various data components will be extracted, reviewed and plotted to show how one can work with such data with relative ease.
+
+
+## Input
+
+For this example, we'll be using an example data set from the [OpenMS Project](https://www.openms.de).  This data is not provided here, but can be dowloaded from the [OpenMS Website](https://www.openms.de/tutorials/).  After downloading the example data, the file used here is located at ```Example_Data/Labelfree/datasets```.
+
+**File**: lfq_spikein_dilution_1.mzML
+
+* LC-MS mzML file generated from a Thermo Scientific LTQ Orbitrap XL
+* 2729 total scans (546 MS1 scans, 2183 MS/MS scans)
+* MD5 Checksum: 1871720000b43f1abedd92d600da71c7
+
+
+---
+
+## Data Processing
+
+### 1. Review of the Experimental and Instrumental Parameters
+
+The ```mzR``` [R package](http://bioconductor.org/packages/release/bioc/html/mzR.html), a part of [Bioconductor](http://bioconductor.org), allows for easy reading and access of mass spectrometry data in mzML, mzXML, mzData, mzIdentML, and netCDF format.  First, we'll read in an mzML file from the [OpenMS Tutorial Example Data](https://www.openms.de/tutorials/).
+
+```{r}
+# Note -- the example data file is not provided here, but can be downloaded from the OpenMS link above
+msdata <- openMSfile("input_data/lfq_spikein_dilution_1.mzML", backend = "pwiz")
+```
+
+The ```openMSFile``` function returns an mzR data object.  We'll use a variety of additional functions to access the data within the mzML file.  First, let's review the experimental run and instrument parameters.
+
+```{r}
+run_info <- msdata %>% 
+  runInfo %>%
+  enframe %>% 
+  as.data.frame
+
+kable(run_info, col.names = c("Parameter", "Value"))
+```
+
+From this table, we can see that the data file contains 2729 scans, see the m/z and LC ranges, and that the data contains both MS and MS/MS data.
+
+Information about the instrument can also be extracted.
+
+```{r}
+instr_info <- msdata %>%
+  instrumentInfo %>%
+  enframe %>%
+  as.data.frame
+
+kable(instr_info, col.names = c("Parameter", "Value"))
+```
+
+This allows us to see the instrument vendor and type, along with any additional information that was captured in the mzML file.
+
+
+### 2. Review of the MS Scan Header Data
+
+Now, let's explore the actual scan data.  The ```mzR``` package allows you to extract the MS scan header data into a data frame.  This allows one to investigate the data at a high-level before digging into the details.
+
+```{r}
+scan_headers <- header(msdata)
+scan_headers_summary <- scan_headers %>%
+  # Here, we're select a subset of interesting columns to show here
+  select(seqNum, msLevel, peaksCount, retentionTime, collisionEnergy, lowMZ, highMZ, precursorMZ, precursorCharge, precursorIntensity)
+kable(head(scan_headers_summary))
+```
+
+The above table shows the first few rows of the scan headers.  One can see that the MS and MS/MS scans are intermixed. For example the first row represents an MS1 scan, while the 2nd through 5th are MS/MS scans, followed by another MS scan.  In the case of the MS/MS scans, information about the target precursor is also given (these entries are zero'd out for the MS scans).  There is also other useful information in the headers such as the number of data points (peaksCount) in the data.
+
+Let's first query the data to determine how the scans are divided by MS-level.
+
+```{r}
+ms_lvl_cnts <- scan_headers %>%
+  count(msLevel) %>%
+  mutate(freq = n / sum(n)) %>%
+  data.frame
+kable(ms_lvl_cnts, align = "c")
+```
+
+From this table, we can see that 20% of the scans are MS1 (one MS1 scan, followed by 4 MS/MS scans).  Next let's look at a histogram of the MS1 scans as a function of retention time.
+
+```{r}
+ms1_scan_headers <- scan_headers %>%
+  filter(msLevel == 1)
+
+ttl <- "MS1 Scan Distribution Across Retention Time"
+ggplot(ms1_scan_headers, aes(retentionTime)) +
+  stat_bin(binwidth = 60) +
+  xlab("Retention Time (sec)") +
+  ylab("Number of Scans") +
+  ggtitle(ttl)
+```
+
+In the above plot, a histogram bin width of 60 seconds is used.  One can see that the MS1 scans are mostly uniform across the LC gradient and occur about every 2 seconds (or ~30 per 1 minute).  We can repeat the same plot for the MS2 scans.
+
+```{r}
+ms2_scan_headers <- scan_headers %>%
+  filter(msLevel == 2)
+
+ttl <- "MS2 Scan Distribution Across Retention Time"
+ggplot(ms2_scan_headers, aes(retentionTime)) +
+  stat_bin(binwidth = 60) +
+  xlab("Retention Time (sec)") +
+  ylab("Number of Scans") +
+  ggtitle(ttl)
+```
+
+Next, let's see where in m/z, retention time space the MS2 events were triggered, and the distribution of the targeted precursor charge states.
+
+```{r}
+ttl <- "MS/MS Events in m/z, Retention Time Space"
+ggplot(ms2_scan_headers, aes(precursorMZ, retentionTime)) +
+  geom_point(alpha = 0.5, shape = 21, fill = "tomato3") +
+  xlab("m/z") +
+  ylab("Retention Time (sec)") +
+  ggtitle(ttl)
+
+ttl <- "Targeted Precursor Charge State Counts"
+ggplot(ms2_scan_headers, aes(as.factor(precursorCharge))) +
+  stat_count() +
+  xlab("Precursor Charge State") +
+  ylab("Number of MS2 Events") +
+  ggtitle(ttl)
+```
+
+Only charge states 2 - 4 were targeted, and most were z = 2.
+
+
+### 3. Review of the Scan Data
+
+The data in the example mzML file also contains centroided peak data for all of the scans, both MS1 and MS/MS.  These can easily be accessed using ```mzR``` functions: ```peaks``` or ```spectra``` (these are used interchangeably).
+
+```{r}
+# peak/spectra data is accessed by scan number (seqNum column in the header data)
+# The peaks function returns a list of 2-column matrices (mz and abundance)
+ms1_peaks <- peaks(msdata, ms1_scan_headers$seqNum)
+ms2_peaks <- peaks(msdata, ms2_scan_headers$seqNum)
+```
+
+```{r}
+length(ms1_peaks)
+head(ms1_peaks[[1]])
+
+length(ms2_peaks)
+head(ms2_peaks[[1]])
+```
+
+Both the ```ms1_peaks``` and ```ms2_peaks``` objects contain the expected number of spectra.  Now let's plot some of the spectra.  First, we'll write a reusable function to make plotting easier.
+
+```{r}
+plot_spectrum <- function(spec_num, ms_mode, peak_data) {
+  if (spec_num < 1 | spec_num > length(peak_data)) {
+    stop("Spectrum number is out of range")
+  }
+  
+  spec <- peak_data[[spec_num]]
+  spec <- as.data.frame(spec)
+  names(spec) <- c("mz", "abundance")
+  
+  ttl <- paste0("MS", ms_mode , " Spectrum #", spec_num, "")
+  ggplot(spec) +
+    geom_segment(aes(x = mz, xend = mz, y = 0, yend = abundance)) +
+    xlab("m/z") +
+    ylab("Abundance") +
+    ggtitle(ttl)
+}
+```
+
+First, let's plot a few of the MS1 spectra.
+
+```{r}
+# We'll do a random sampling of scans
+plot_spectrum(sample(1:length(ms1_peaks), 1), 1, ms1_peaks)
+plot_spectrum(sample(1:length(ms1_peaks), 1), 1, ms1_peaks)
+plot_spectrum(sample(1:length(ms1_peaks), 1), 1, ms1_peaks)
+```
+
+And some MS/MS spectra.
+
+```{r}
+plot_spectrum(sample(1:length(ms2_peaks), 1), 2, ms2_peaks)
+plot_spectrum(sample(1:length(ms2_peaks), 1), 2, ms2_peaks)
+plot_spectrum(sample(1:length(ms2_peaks), 1), 2, ms2_peaks)
+```
+
+As a final example, let's link up the MS/MS data to the closest MS1 scans in retention time so we can investigate the signals from both the targeted precursor and the resulting product spectrum.  This will require some data "tidying", like we did in the first example, to combine information from the scan headers and the actual scan data.
+
+First, we'll randomly select 3 MS/MS spectra to work with.
+
+```{r}
+selected_ms2_scans <- ms2_scan_headers[sample(1:nrow(ms2_scan_headers), 3),]
+
+ms1_ms2_data <- data.frame()
+for (idx in 1:nrow(selected_ms2_scans)) {
+  ms2_scan <- selected_ms2_scans[idx,]
+  # Compute the RT differences to all the MS1 scans and find the smallest
+  rt_diff <- abs(ms2_scan$retentionTime - ms1_scan_headers$retentionTime)
+  idx_sel <- which(rt_diff == min(rt_diff))
+  
+  tdf <- data.frame(ms1_scan_num = ms1_scan_headers[idx_sel, "seqNum"],
+                    ms2_scan_num = ms2_scan$seqNum,
+                    precursor_mz = ms2_scan$precursorMZ,
+                    precursor_rt = ms2_scan$retentionTime,
+                    precursor_z = ms2_scan$precursorCharge)
+  ms1_ms2_data <- rbind(ms1_ms2_data, tdf)
+}
+
+
+
+for (idx in 1:nrow(ms1_ms2_data)) {
+  cur_row <- ms1_ms2_data[idx,]
+  ms1_scan_num <- cur_row$ms1_scan_num
+  ms2_scan_num <- cur_row$ms2_scan_num
+  prec_mz <- cur_row$precursor_mz
+  prec_z <- cur_row$precursor_z
+  
+  peaks_1 <- msdata %>%
+    peaks(ms1_scan_num) %>%
+    as.data.frame %>%
+    rename(mz = V1, abundance = V2) %>%
+    filter(mz >= prec_mz - 0.2, mz <= prec_mz + 4 * (1/prec_z)) %>%
+    mutate(ms_lvl = "MS1")
+  
+  peaks_2 <- msdata %>%
+    peaks(ms2_scan_num) %>%
+    as.data.frame %>%
+    rename(mz = V1, abundance = V2) %>%
+    mutate(ms_lvl = "MS/MS")
+  
+  ttl <- paste0("MS1 and MS/MS Spectra\n", 
+                "Precursor m/z = ", round(prec_mz,4), ", z = ", prec_z)
+  peaks_1_2 <- rbind(peaks_1, peaks_2)
+  peaks_1_2 <- peaks_1_2 %>%
+    mutate(ms_lvl = factor(ms_lvl, levels = c("MS1", "MS/MS")))
+  
+  p1 <- ggplot(peaks_1_2, aes(mz, 0)) + 
+    geom_segment(aes(xend = mz, yend = abundance)) + 
+    facet_wrap(~ms_lvl, scales = "free") +
+    xlab("m/z") +
+    ylab("Abundance") +
+    ggtitle(ttl)
+  
+  print(p1)
+}
+
+```
+
+---
+
+## Summary
+
+In this example, we've explored how one can work with MS data using R.  Using a few high-level functions from the ```mzR``` R package, experimental meta-data and scan data can be easily accessed. Once the data has been imported into R, all of the standard R tools for data analysis and plotting are available for use.  This shows that it is possible for all scientists to directly work with their data, and not have to rely on existing tools and software packages for data analysis.
+
+
+
+
+
+

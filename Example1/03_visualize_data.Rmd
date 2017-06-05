@@ -1,0 +1,145 @@
+---
+title: 'Example #1: Exploratory Data Analysis and Visualization'
+author: "R. Benz"
+date: "5/9/2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+```
+
+---
+
+## Purpose
+
+Now that we've tidied and merged the attributes and worklist data files, we can explore and review the data using vizualizations.  Data visualization is a quick and intuitive way to understand the data you're working with and look for potential problems.
+
+---
+
+## Data Processing
+
+### 1. Exploration and Visualization of the Worklist Data
+
+
+```{r, message=FALSE}
+worklist_dat <- read_csv("parsed_data/worklist_data.csv")
+exp_dat <- read_csv("parsed_data/experiment_attributes_data.csv")
+```
+
+First, let's visualize the sample type composition for the LC-MS worklists to make sure the ordering matches our expectations.
+
+```{r}
+ttl <- "Worklist Run Order Composition"
+p1 <- ggplot(worklist_dat, aes(run_idx, sample_type)) + 
+  geom_point() + 
+  facet_wrap(~expr_date, ncol = 1) +
+  xlab("Run Index") +
+  ylab("Sample Type") +
+  ggtitle(ttl)
+p1
+
+```
+
+The above plot shows the expected structure of the experiments on each of the three days.  Worklist ordering mistakes, if present, could be easily spotted in this plot.
+
+We can also produce a table of count for the LC-MS method that were used to run the instrument during data collection.
+
+```{r}
+method_cnts <- worklist_dat %>% 
+  group_by(sample_type) %>% 
+  count(method)
+knitr::kable(method_cnts)
+```
+
+This simple table shows that only two methods were used in the data collection, one for the blanks and one for the samples.  Had any method specifications been incorrect (e.g. a blank method was run on a sample), this table would have shown the mistake.
+
+Finally, let's plot the distribution of samples collected across time.
+
+```{r, message=FALSE}
+ttl <- "Sample Collection Across Time"
+p2 <- ggplot(exp_dat, aes(collection_date)) +
+  stat_bin() +
+  xlab("Collection Date") +
+  ylab("Sample Count") +
+  ggtitle(ttl)
+p2
+```
+
+
+### 2. Exploration and Visualization of the Attributes Data
+
+A few simple plots can show the characteristics of collected study samples.  First, let's see how the samples break out by treatment, gender and site.
+
+```{r}
+ttl <- "Sample Counts by Treatment, Gender and Site"
+p3 <- ggplot(exp_dat, aes(treatment, fill = gender)) + 
+  stat_count(position = "dodge") + 
+  facet_wrap(~site) + 
+  scale_fill_manual("Gender", values = c("#2ca25f", "#3182bd")) +
+  xlab("Treatment") +
+  ylab("Sample Count") +
+  ggtitle(ttl)
+p3
+```
+
+The plot above is very simple, showing a balanced study design across treatment condition, gender and sites.  In present, any difference between these variables would be easy to spot in such a plot.
+
+Next, we'll look at the distribution of ages in increasingly complex plots revealing additional variables.  In the first plot, we'll look at the distribution of ages across the 3 treatment types using boxplots.
+
+```{r}
+ttl <- "Age Distributions by Treatment Type"
+p4 <- ggplot(exp_dat, aes(treatment, age)) +
+  geom_boxplot() +
+  xlab("Treatment") +
+  ylab("Age") +
+  ggtitle(ttl)
+p4
+```
+
+Next, we'll add in the variable of gender utiling fill color.
+
+```{r}
+ttl <- "Age Distributions by Treatment Type and Gender"
+p5 <- ggplot(exp_dat, aes(treatment, age, fill = gender)) +
+  geom_boxplot() +
+  xlab("Treatment") +
+  ylab("Age") +
+  scale_fill_manual("Gender", values = c("#2ca25f", "#3182bd")) +
+  ggtitle(ttl)
+p5
+```
+
+Finally, we'll break out the boxplots by site using *faceting*.
+
+```{r}
+ttl <- "Age Distributions by Treatment Type, Gender and Site"
+p6 <- ggplot(exp_dat, aes(treatment, age, fill = gender)) +
+  geom_boxplot() +
+  xlab("Treatment") +
+  ylab("Age") +
+  scale_fill_manual("Gender", values = c("#2ca25f", "#3182bd")) +
+  facet_wrap(~site) +
+  ggtitle(ttl)
+p6
+```
+
+These plots serve as a basis for understanding the attributes of the samples.  Further statistical analysis could be performed (e.g. a t-test comparing age by treatment type) as informed by this new understanding of the data.
+
+--- 
+
+## Summary
+
+Here, we used exploratory data analysis and visualization techniques to review the study attributes and worklist data.  This process allowed us to look for potential problems in the data, and to *get a feel* for the data itself.  For example we now know:
+
+* The collected samples are balanced across site, gender and treatment type.
+* Samples were collected across ~2 months.
+* The median patient age is ~55, but this can vary a bit depending upon gender and site.
+
+Though we didn't perform any quantitative analyses, this intial review can serves as a basis for it.  For example, exploratory data analysis can suggest which analyses are important to perform next, or highlight new analyses that weren't initially considered.  In short, exploratory data analysis and visualization should be an essential part of any data analysis.
+
+
+
+
+
